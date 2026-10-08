@@ -4,6 +4,7 @@ import { files } from './files';
 
 /** @type {import('@webcontainer/api').WebContainer}  */
 let webcontainerInstance;
+let previewUrl = null;
 
 window.addEventListener('load', async () => {
   textareaEl.value = files['index.js'].file.contents;
@@ -41,6 +42,7 @@ async function startDevServer() {
 
   // Wait for `server-ready` event
   webcontainerInstance.on('server-ready', (port, url) => {
+    previewUrl = url;
     iframeEl.src = url;
   });
 }
@@ -69,3 +71,35 @@ const iframeEl = document.querySelector('iframe');
 
 /** @type {HTMLTextAreaElement | null} */
 const textareaEl = document.querySelector('textarea');
+
+// WebMCP is optional: the editor keeps working in browsers without modelContext.
+const modelContext = document.modelContext;
+if (typeof modelContext?.registerTool === 'function') {
+  const controller = new AbortController();
+  window.addEventListener('pagehide', () => controller.abort(), { once: true });
+  const tools = [
+    {
+      name: 'get_editor_code',
+      title: 'Read the starter code',
+      description: 'Returns the current contents of the visible index.js editor and whether its preview server is ready.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      annotations: { readOnlyHint: true, untrustedContentHint: false },
+      execute() { return { file: 'index.js', content: textareaEl.value, previewReady: Boolean(previewUrl), previewUrl }; },
+    },
+    {
+      name: 'replace_editor_code',
+      title: 'Replace the starter code',
+      description: 'Replaces index.js in the visible editor and the current WebContainer session. This edits the running browser sandbox only; review the code before using it elsewhere.',
+      inputSchema: { type: 'object', properties: { content: { type: 'string', description: 'Complete replacement JavaScript for index.js (maximum 50000 characters).' } }, required: ['content'], additionalProperties: false },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      async execute(input) {
+        if (typeof input?.content !== 'string' || input.content.length > 50000) throw new TypeError('Provide JavaScript text up to 50000 characters.');
+        if (!webcontainerInstance) throw new Error('The WebContainer is still starting. Try again after the preview is ready.');
+        textareaEl.value = input.content;
+        await writeIndexJS(input.content);
+        return { file: 'index.js', characters: input.content.length, updated: true, persistence: 'current browser session' };
+      },
+    },
+  ];
+  for (const tool of tools) modelContext.registerTool(tool, { signal: controller.signal }).catch((error) => console.warn('WebMCP registration failed:', tool.name, error));
+}
