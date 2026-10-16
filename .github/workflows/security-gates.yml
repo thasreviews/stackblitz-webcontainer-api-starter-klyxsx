@@ -1,0 +1,42 @@
+name: Security gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: Full-history secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # checkout v6
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # gitleaks-action v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
+  dependency-and-build:
+    name: Dependency audit and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # checkout v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # setup-node v6
+        with:
+          node-version: 24
+      - name: Audit locked npm dependencies
+        run: npm audit --audit-level=high
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build
